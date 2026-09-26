@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Word 書式エディター</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #f8f9fb;
+    --surface: #ffffff;
+    --border: #e2e6ea;
+    --border-focus: #4a90d9;
+    --text-primary: #1a1d23;
+    --text-secondary: #5a6270;
+    --text-muted: #9aa3ad;
+    --accent: #4a90d9;
+    --accent-light: #e8f2fd;
+    --accent-hover: #3a7bc8;
+    --success: #2d9e6b;
+    --warning: #e8a020;
+    --section-header: #f0f4f8;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.1);
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+    box-sizing: border-box;
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .app-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    height: 56px;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
+  }
+  .app-header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .app-header .logo-mark {
+    width: 28px;
+    height: 28px;
+    background: var(--accent);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .app-body {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    grid-template-rows: auto 1fr;
+    gap: 0;
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0;
+    min-height: calc(100vh - 56px);
+  }
+
+  /* Upload Zone */
+  .upload-zone {
+    grid-column: 1 / -1;
+    padding: 24px 24px 0;
+    display: none;
+  }
+  .upload-zone.active { display: block; }
+
+  .drop-area {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    padding: 48px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .drop-area:hover, .drop-area.dragover {
+    border-color: var(--accent);
+    background: var(--accent-light);
+  }
+  .drop-area .icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    opacity: 0.7;
+  }
+  .drop-area h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 6px;
+    color: var(--text-primary);
+  }
+  .drop-area p {
+    color: var(--text-secondary);
+    margin: 0 0 20px;
+    font-size: 13px;
+  }
+  .btn-upload {
+    display: inline-block;
+    background: var(--accent);
+    color: white;
+    padding: 9px 20px;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: background 0.15s;
+  }
+  .btn-upload:hover { background: var(--accent-hover); }
+  #file-input { display: none; }
+
+  /* Main Editor Layout */
+  .editor-area {
+    display: none;
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr 300px;
+    gap: 0;
+  }
+  .editor-area.active { display: grid; }
+
+  /* Left: filter + list */
+  .left-panel {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    min-height: 0;
+  }
+
+  /* Filter Section */
+  .filter-section {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 20px;
+  }
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: block;
+  }
+  .filter-selects {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .filter-arrow {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 0 2px;
+  }
+  select.filter-select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 28px 6px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa3ad'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    transition: border-color 0.15s;
+    font-family: var(--font);
+  }
+  select.filter-select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  /* Toolbar */
+  .list-toolbar {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .file-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file-info strong {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+  .btn-sm {
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s;
+    font-family: var(--font);
+  }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: white; }
+
+  /* Document List */
+  .doc-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    background: var(--bg);
+  }
+
+  .doc-group {
+    margin-bottom: 4px;
+  }
+  .group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    user-select: none;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-bottom: 2px;
+    transition: background 0.1s;
+  }
+  .group-header:hover { background: var(--accent-light); }
+
+  .group-header.level-1 {
+    font-weight: 600;
+    font-size: 13px;
+    background: #edf2f7;
+  }
+  .group-header.level-2 {
+    font-weight: 500;
+    font-size: 12.5px;
+    margin-left: 16px;
+    background: var(--surface);
+  }
+  .group-header.level-3 {
+    font-weight: 400;
+    font-size: 12px;
+    margin-left: 32px;
+    background: var(--bg);
+  }
+
+  .group-children.level-1 { margin-left: 0; }
+  .group-children.level-2 { margin-left: 16px; }
+  .group-children.level-3 { margin-left: 32px; }
+
+  .toggle-icon {
+    font-size: 10px;
+    color: var(--text-muted);
+    transition: transform 0.15s;
+    flex-shrink: 0;
+    width: 14px;
+    text-align: center;
+  }
+  .group-header.collapsed .toggle-icon { transform: rotate(-90deg); }
+  .group-children.collapsed { display: none; }
+
+  .group-label {
+    flex: 1;
+    color: var(--text-primary);
+  }
+  .group-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  /* Checkbox styles */
+  .cb-wrap {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    accent-color: var(--accent);
+    flex-shrink: 0;
+  }
+  input[type="checkbox"].indeterminate {
+    opacity: 0.7;
+  }
+
+  /* Doc item */
+  .doc-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.1s;
+    border: 1px solid transparent;
+  }
+  .doc-item:hover { background: var(--accent-light); border-color: transparent; }
+  .doc-item.selected { background: var(--accent-light); border-color: var(--accent); }
+
+  .doc-item-text {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .doc-item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  /* Right Panel: Format Editor */
+  .right-panel {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .format-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--section-header);
+  }
+  .format-header h3 {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 0 0 2px;
+    color: var(--text-primary);
+  }
+  .selection-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .format-body {
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .format-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .format-group label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  select.format-select, input.format-input {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--bg);
+    font-family: var(--font);
+    transition: border-color 0.15s;
+  }
+  select.format-select {
+    appearance: none;
+    -webkit-appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239aa3ad'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 10px;
+    cursor: pointer;
+  }
+  select.format-select:focus, input.format-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: white;
+  }
+
+  .toggle-bold {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text-secondary);
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .toggle-bold.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+    font-weight: 700;
+  }
+  .toggle-bold:hover:not(.on) { border-color: var(--accent); color: var(--accent); }
+
+  .btn-apply {
+    width: 100%;
+    padding: 9px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: background 0.15s;
+    margin-top: 4px;
+  }
+  .btn-apply:hover { background: var(--accent-hover); }
+  .btn-apply:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .format-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--section-header);
+    margin-top: auto;
+  }
+  .btn-download {
+    width: 100%;
+    padding: 10px;
+    background: var(--success);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: var(--font);
+    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .btn-download:hover { background: #268a5c; }
+  .btn-download:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .no-selection-msg {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--text-primary);
+    color: white;
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    box-shadow: var(--shadow-md);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: all 0.2s;
+    pointer-events: none;
+    z-index: 200;
+  }
+  .toast.show { opacity: 1; transform: none; }
+
+  /* Loading */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(255,255,255,0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 300;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .loading-overlay.active { display: flex; }
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { color: var(--text-secondary); font-size: 14px; }
+
+  @media (max-width: 768px) {
+    .app-body { grid-template-columns: 1fr; }
+    .editor-area { grid-template-columns: 1fr; }
+    .right-panel { border-left: none; border-top: 1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <div class="logo-mark">W</div>
+  <h1>Word 書式エディター</h1>
+  <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <button class="btn-sm" id="btn-reload" style="display:none">別のファイルを開く</button>
+  </div>
+</div>
+
+<div class="app-body">
+  <!-- Upload -->
+  <div class="upload-zone active" id="upload-zone">
+    <div class="drop-area" id="drop-area">
+      <div class="icon">📄</div>
+      <h2>Word ファイルをアップロード</h2>
+      <p>.docx ファイルをドラッグ＆ドロップするか、ボタンから選択してください</p>
+      <button class="btn-upload" onclick="document.getElementById('file-input').click()">ファイルを選択</button>
+      <input type="file" id="file-input" accept=".docx">
+    </div>
+  </div>
+
+  <!-- Editor -->
+  <div class="editor-area" id="editor-area">
+    <div class="left-panel">
+      <!-- Filter -->
+      <div class="filter-section">
+        <span class="section-label">書式フィルター</span>
+        <div class="filter-selects" id="filter-selects"></div>
+      </div>
+      <!-- Toolbar -->
+      <div class="list-toolbar">
+        <div class="file-info" id="file-info-label"></div>
+        <button class="btn-sm" id="btn-select-all">すべて選択</button>
+        <button class="btn-sm" id="btn-deselect-all">選択解除</button>
+      </div>
+      <!-- List -->
+      <div class="doc-list" id="doc-list">
+        <div class="empty-state">ファイルを読み込んでいます...</div>
+      </div>
+    </div>
+
+    <!-- Right Panel -->
+    <div class="right-panel">
+      <div class="format-header">
+        <h3>書式変更</h3>
+        <div class="selection-count" id="sel-count">0 件選択中</div>
+      </div>
+      <div id="format-panel">
+        <div class="no-selection-msg">
+          文章にチェックを入れると<br>書式を一括変更できます
+        </div>
+      </div>
+      <div class="format-footer">
+        <button class="btn-download" id="btn-download" disabled>
+          <span>⬇</span> .docx をダウンロード
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="loading-overlay" id="loading">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">解析中...</div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+const STATE = {
+  fileName: '',
+  originalZip: null,      // JSZip instance of original
+  xmlContent: '',          // word/document.xml original
+  segments: [],            // parsed segments
+  filters: ['none'],       // current filter chain
+  checkedIds: new Set(),
+  customFontInput: false,
+};
+
+const FILTER_OPTIONS = [
+  { value: 'none', label: 'フィルタなし' },
+  { value: 'fontFamily', label: 'フォントファミリー' },
+  { value: 'fontSize', label: 'フォントサイズ' },
+  { value: 'bold', label: '太字' },
+];
+
+const COMMON_FONTS = [
+  'MS明朝', 'MSPゴシック', 'MS Gothic', 'MS Mincho', 'MSP明朝',
+  'ＭＳ ゴシック', 'ＭＳ 明朝',
+  '游明朝', '游ゴシック', '游ゴシック Medium',
+  'HG明朝E', 'HGゴシックE', 'HGP明朝E', 'HGPゴシックE',
+  'メイリオ', 'Meiryo', 'Meiryo UI',
+  '小塚明朝 Pro', '小塚ゴシック Pro',
+  'ヒラギノ明朝 Pro', 'ヒラギノ角ゴ Pro',
+  'Arial', 'Times New Roman', 'Calibri', 'Cambria',
+  'Century', 'Century Gothic', 'Courier New',
+  'Georgia', 'Helvetica', 'Tahoma', 'Verdana',
+  'その他',
+];
+
+// ============================================================
+// UTILS
+// ============================================================
+function showToast(msg, duration=2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}
+
+function showLoading(text='処理中...') {
+  document.getElementById('loading-text').textContent = text;
+  document.getElementById('loading').classList.add('active');
+}
+function hideLoading() {
+  document.getElementById('loading').classList.remove('active');
+}
+
+function truncate(str, max=60) {
+  if (!str) return '';
+  return str.length > max ? str.slice(0, max) + '…' : str;
+}
+
+// ============================================================
+// DOCX PARSING
+// ============================================================
+async function parseDocx(file) {
+  showLoading('.docx を解析中...');
+  await new Promise(r => setTimeout(r, 50));
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    STATE.originalZip = zip;
+    STATE.fileName = file.name;
+
+    const xmlFile = zip.file('word/document.xml');
+    if (!xmlFile) throw new Error('word/document.xml が見つかりません');
+    const xmlText = await xmlFile.async('string');
+    STATE.xmlContent = xmlText;
+
+    const segments = parseXmlToSegments(xmlText);
+    STATE.segments = segments;
+
+    hideLoading();
+    return segments;
+  } catch(e) {
+    hideLoading();
+    throw e;
+  }
+}
+
+// Parse word/document.xml into segments
+// A segment = a contiguous run of text with the same effective formatting
+function parseXmlToSegments(xmlText) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, 'application/xml');
+
+  const NS = {
+    w: 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+  };
+  const wGet = (el, name) => el.getElementsByTagNameNS(NS.w, name);
+  const wFirst = (el, name) => el.getElementsByTagNameNS(NS.w, name)[0];
+
+  // Get paragraph default properties
+  function getParagraphDefaults(pPr) {
+    let fontFamily = null;
+    let fontSize = null;
+    let bold = null;
+    if (!pPr) return { fontFamily, fontSize, bold };
+    const rPr = wFirst(pPr, 'rPr');
+    if (rPr) {
+      const fonts = wFirst(rPr, 'rFonts');
+      if (fonts) {
+        fontFamily = fonts.getAttributeNS(NS.w, 'ascii') ||
+                     fonts.getAttributeNS(NS.w, 'eastAsia') ||
+                     fonts.getAttributeNS(NS.w, 'hAnsi') || null;
+      }
+      const sz = wFirst(rPr, 'sz');
+      if (sz) {
+        const half = parseFloat(sz.getAttributeNS(NS.w, 'val'));
+        if (!isNaN(half)) fontSize = half / 2;
+      }
+      const bEl = wFirst(rPr, 'b');
+      if (bEl) {
+        const val = bEl.getAttributeNS(NS.w, 'val');
+        bold = (val !== 'false' && val !== '0');
+      }
+    }
+    return { fontFamily, fontSize, bold };
+  }
+
+  // Get effective run formatting (run inherits from paragraph)
+  function getRunFormat(rPr, paraDefaults) {
+    let fontFamily = paraDefaults.fontFamily;
+    let fontSize = paraDefaults.fontSize;
+    let bold = paraDefaults.bold || false;
+
+    if (rPr) {
+      const fonts = wFirst(rPr, 'rFonts');
+      if (fonts) {
+        const f = fonts.getAttributeNS(NS.w, 'ascii') ||
+                  fonts.getAttributeNS(NS.w, 'eastAsia') ||
+                  fonts.getAttributeNS(NS.w, 'hAnsi');
+        if (f) fontFamily = f;
+      }
+      const sz = wFirst(rPr, 'sz');
+      if (sz) {
+        const half = parseFloat(sz.getAttributeNS(NS.w, 'val'));
+        if (!isNaN(half)) fontSize = half / 2;
+      }
+      const bEl = wFirst(rPr, 'b');
+      const bCs = wFirst(rPr, 'bCs');
+      if (bEl) {
+        const val = bEl.getAttributeNS(NS.w, 'val');
+        bold = (val !== 'false' && val !== '0');
+      } else if (bCs) {
+        const val = bCs.getAttributeNS(NS.w, 'val');
+        bold = (val !== 'false' && val !== '0');
+      }
+    }
+
+    return {
+      fontFamily: fontFamily || '(未設定)',
+      fontSize: fontSize || 10.5,
+      bold: bold,
+    };
+  }
+
+  // Collect paragraphs
+  const body = wFirst(doc.documentElement, 'body');
+  if (!body) return [];
+
+  const paragraphs = Array.from(wGet(body, 'p'));
+  let globalOrder = 0;
+  const segments = [];
+
+  for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+    const para = paragraphs[pIdx];
+    const pPr = wFirst(para, 'pPr');
+    const paraDefaults = getParagraphDefaults(pPr);
+    const runs = Array.from(wGet(para, 'r'));
+
+    if (runs.length === 0) continue;
+
+    // Build run info list for this paragraph
+    const runInfos = [];
+    for (const run of runs) {
+      const tEls = run.getElementsByTagNameNS(NS.w, 't');
+      if (tEls.length === 0) continue;
+      let text = '';
+      for (const t of tEls) text += t.textContent;
+      if (!text) continue;
+
+      const rPr = wFirst(run, 'rPr');
+      const fmt = getRunFormat(rPr, paraDefaults);
+      runInfos.push({ text, fmt, paraIdx: pIdx, run });
+    }
+
+    if (runInfos.length === 0) continue;
+
+    // Merge adjacent runs with same format into segments
+    let cur = { ...runInfos[0] };
+    for (let i = 1; i < runInfos.length; i++) {
+      const ri = runInfos[i];
+      if (fmtEqual(ri.fmt, cur.fmt)) {
+        cur.text += ri.text;
+      } else {
+        segments.push(makeSegment(cur, globalOrder++, pIdx));
+        cur = { ...ri };
+      }
+    }
+    segments.push(makeSegment(cur, globalOrder++, pIdx));
+  }
+
+  return segments;
+}
+
+function fmtEqual(a, b) {
+  return a.fontFamily === b.fontFamily &&
+         a.fontSize === b.fontSize &&
+         a.bold === b.bold;
+}
+
+let segIdCounter = 0;
+function makeSegment(runInfo, order, paraIdx) {
+  return {
+    id: ++segIdCounter,
+    text: runInfo.text,
+    order,
+    paraIdx,
+    fmt: { ...runInfo.fmt },
+    originalFmt: { ...runInfo.fmt },
+  };
+}
+
+// ============================================================
+// FILTER SELECTS
+// ============================================================
+function renderFilterSelects() {
+  const container = document.getElementById('filter-selects');
+  container.innerHTML = '';
+
+  STATE.filters.forEach((val, idx) => {
+    if (idx > 0) {
+      const arrow = document.createElement('span');
+      arrow.className = 'filter-arrow';
+      arrow.textContent = '→';
+      container.appendChild(arrow);
+    }
+
+    const sel = document.createElement('select');
+    sel.className = 'filter-select';
+    sel.dataset.idx = idx;
+
+    // Build options: none + options not used in previous slots
+    const usedBefore = new Set(STATE.filters.slice(0, idx).filter(f => f !== 'none'));
+
+    FILTER_OPTIONS.forEach(opt => {
+      if (opt.value !== 'none' && usedBefore.has(opt.value) && opt.value !== val) return;
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.value === val) o.selected = true;
+      sel.appendChild(o);
+    });
+
+    sel.addEventListener('change', () => {
+      const newVal = sel.value;
+      STATE.filters[idx] = newVal;
+      // Trim trailing filters
+      if (newVal === 'none') {
+        STATE.filters = STATE.filters.slice(0, idx + 1);
+      } else {
+        // Add next slot if not at max (3 active filters)
+        const active = STATE.filters.filter(f => f !== 'none');
+        if (active.length < 3 && STATE.filters.length === idx + 1) {
+          STATE.filters.push('none');
+        }
+      }
+      renderFilterSelects();
+      renderDocList();
+    });
+
+    container.appendChild(sel);
+  });
+}
+
+// ============================================================
+// DOCUMENT LIST RENDERING
+// ============================================================
+function getFilterLabel(filterKey, value) {
+  switch(filterKey) {
+    case 'fontFamily': return value;
+    case 'fontSize': return `${value}pt`;
+    case 'bold': return value ? '太字' : '太字でない';
+    default: return String(value);
+  }
+}
+
+function getFilterValue(seg, filterKey) {
+  switch(filterKey) {
+    case 'fontFamily': return seg.fmt.fontFamily;
+    case 'fontSize': return seg.fmt.fontSize;
+    case 'bold': return seg.fmt.bold;
+    default: return null;
+  }
+}
+
+function renderDocList() {
+  const container = document.getElementById('doc-list');
+  container.innerHTML = '';
+
+  const segs = STATE.segments;
+  if (segs.length === 0) {
+    container.innerHTML = '<div class="empty-state">テキストが見つかりません</div>';
+    return;
+  }
+
+  const activeFilters = STATE.filters.filter(f => f !== 'none');
+
+  if (activeFilters.length === 0) {
+    // No filter: flat list
+    segs.forEach(seg => {
+      container.appendChild(makeDocItem(seg, 0));
+    });
+  } else {
+    // Hierarchical
+    const tree = buildTree(segs, activeFilters, 0);
+    tree.forEach(node => {
+      renderNode(node, container, 1);
+    });
+  }
+
+  updateCheckboxStates();
+}
+
+function buildTree(segs, filters, depth) {
+  if (filters.length === 0 || depth >= filters.length) {
+    return segs.map(s => ({ type: 'leaf', seg: s }));
+  }
+  const filterKey = filters[depth];
+  // Group while preserving order, keeping contiguous same-value runs separate
+  const groups = [];
+  let cur = null;
+
+  for (const seg of segs) {
+    const val = getFilterValue(seg, filterKey);
+    if (cur && cur.value === val && cur.continuous) {
+      cur.segs.push(seg);
+      cur.lastOrder = seg.order;
+    } else {
+      cur = {
+        value: val,
+        label: getFilterLabel(filterKey, val),
+        segs: [seg],
+        continuous: true,
+        lastOrder: seg.order,
+      };
+      groups.push(cur);
+    }
+  }
+
+  return groups.map(g => ({
+    type: 'group',
+    filterKey,
+    value: g.value,
+    label: g.label,
+    children: buildTree(g.segs, filters, depth + 1),
+    segIds: collectSegIds(g.segs),
+  }));
+}
+
+function collectSegIds(segs) {
+  return segs.map(s => s.id);
+}
+
+let nodeIdCounter = 0;
+function renderNode(node, container, level) {
+  if (node.type === 'leaf') {
+    container.appendChild(makeDocItem(node.seg, level));
+    return;
+  }
+
+  const groupEl = document.createElement('div');
+  groupEl.className = 'doc-group';
+
+  const header = document.createElement('div');
+  const nodeId = 'group-' + (++nodeIdCounter);
+  header.className = `group-header level-${Math.min(level, 3)}`;
+  header.dataset.nodeId = nodeId;
+
+  const toggle = document.createElement('span');
+  toggle.className = 'toggle-icon';
+  toggle.textContent = '▼';
+
+  const cbWrap = document.createElement('div');
+  cbWrap.className = 'cb-wrap';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.dataset.groupNodeId = nodeId;
+  cb.dataset.segIds = JSON.stringify(node.segIds);
+  cb.addEventListener('change', (e) => {
+    e.stopPropagation();
+    const ids = JSON.parse(cb.dataset.segIds);
+    ids.forEach(id => {
+      if (cb.checked) STATE.checkedIds.add(id);
+      else STATE.checkedIds.delete(id);
+    });
+    updateCheckboxStates();
+    updateFormatPanel();
+  });
+  cbWrap.appendChild(cb);
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'group-label';
+  labelEl.textContent = node.label;
+
+  const countEl = document.createElement('span');
+  countEl.className = 'group-count';
+  countEl.textContent = `${node.segIds.length}件`;
+
+  header.appendChild(toggle);
+  header.appendChild(cbWrap);
+  header.appendChild(labelEl);
+  header.appendChild(countEl);
+
+  const childrenEl = document.createElement('div');
+  childrenEl.className = `group-children level-${Math.min(level, 3)}`;
+  childrenEl.id = nodeId + '-children';
+
+  node.children.forEach(child => renderNode(child, childrenEl, level + 1));
+
+  header.addEventListener('click', (e) => {
+    if (e.target === cb || e.target === cbWrap) return;
+    header.classList.toggle('collapsed');
+    childrenEl.classList.toggle('collapsed');
+    toggle.style.transform = header.classList.contains('collapsed') ? 'rotate(-90deg)' : '';
+  });
+
+  groupEl.appendChild(header);
+  groupEl.appendChild(childrenEl);
+  container.appendChild(groupEl);
+}
+
+function makeDocItem(seg, level) {
+  const item = document.createElement('div');
+  item.className = 'doc-item';
+  item.style.marginLeft = `${level * 16}px`;
+  item.dataset.segId = seg.id;
+
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.dataset.segId = seg.id;
+  cb.checked = STATE.checkedIds.has(seg.id);
+  cb.addEventListener('change', (e) => {
+    e.stopPropagation();
+    if (cb.checked) STATE.checkedIds.add(seg.id);
+    else STATE.checkedIds.delete(seg.id);
+    updateCheckboxStates();
+    updateFormatPanel();
+  });
+
+  const text = document.createElement('span');
+  text.className = 'doc-item-text';
+  text.textContent = truncate(seg.text, 55);
+  text.title = seg.text;
+
+  const meta = document.createElement('span');
+  meta.className = 'doc-item-meta';
+  meta.textContent = `${seg.fmt.fontSize}pt`;
+
+  item.appendChild(cb);
+  item.appendChild(text);
+  item.appendChild(meta);
+
+  item.addEventListener('click', (e) => {
+    if (e.target === cb) return;
+    cb.checked = !cb.checked;
+    if (cb.checked) STATE.checkedIds.add(seg.id);
+    else STATE.checkedIds.delete(seg.id);
+    updateCheckboxStates();
+    updateFormatPanel();
+  });
+
+  return item;
+}
+
+function updateCheckboxStates() {
+  // Update group checkboxes (indeterminate state)
+  document.querySelectorAll('[data-group-node-id]').forEach(cb => {
+    const ids = JSON.parse(cb.dataset.segIds);
+    const checked = ids.filter(id => STATE.checkedIds.has(id)).length;
+    if (checked === 0) {
+      cb.checked = false;
+      cb.indeterminate = false;
+    } else if (checked === ids.length) {
+      cb.checked = true;
+      cb.indeterminate = false;
+    } else {
+      cb.checked = false;
+      cb.indeterminate = true;
+    }
+  });
+
+  // Update leaf checkboxes
+  document.querySelectorAll('[data-seg-id]').forEach(cb => {
+    if (cb.dataset.segId) {
+      cb.checked = STATE.checkedIds.has(parseInt(cb.dataset.segId));
+    }
+  });
+
+  const count = STATE.checkedIds.size;
+  document.getElementById('sel-count').textContent = `${count} 件選択中`;
+  document.getElementById('btn-download').disabled = STATE.segments.length === 0;
+}
+
+// ============================================================
+// FORMAT PANEL
+// ============================================================
+function updateFormatPanel() {
+  const panel = document.getElementById('format-panel');
+  const ids = Array.from(STATE.checkedIds);
+
+  if (ids.length === 0) {
+    panel.innerHTML = `<div class="no-selection-msg">文章にチェックを入れると<br>書式を一括変更できます</div>`;
+    return;
+  }
+
+  const selectedSegs = STATE.segments.filter(s => ids.includes(s.id));
+  const initial = computeInitialFormat(selectedSegs);
+
+  panel.innerHTML = '';
+  const body = document.createElement('div');
+  body.className = 'format-body';
+
+  // Font Family
+  const ffGroup = document.createElement('div');
+  ffGroup.className = 'format-group';
+  const ffLabel = document.createElement('label');
+  ffLabel.textContent = 'フォントファミリー';
+  const ffSel = document.createElement('select');
+  ffSel.className = 'format-select';
+  ffSel.id = 'fmt-fontFamily';
+
+  COMMON_FONTS.forEach(f => {
+    const o = document.createElement('option');
+    o.value = f;
+    o.textContent = f;
+    if (f === initial.fontFamily) o.selected = true;
+    ffSel.appendChild(o);
+  });
+
+  // Add current value if not in list
+  if (!COMMON_FONTS.includes(initial.fontFamily) && initial.fontFamily !== 'その他') {
+    const o = document.createElement('option');
+    o.value = initial.fontFamily;
+    o.textContent = initial.fontFamily;
+    o.selected = true;
+    ffSel.insertBefore(o, ffSel.firstChild);
+  }
+
+  const ffCustomWrap = document.createElement('div');
+  ffCustomWrap.style.display = 'none';
+  const ffCustom = document.createElement('input');
+  ffCustom.type = 'text';
+  ffCustom.className = 'format-input';
+  ffCustom.id = 'fmt-fontFamily-custom';
+  ffCustom.placeholder = 'フォント名を入力';
+  ffCustomWrap.appendChild(ffCustom);
+
+  ffSel.addEventListener('change', () => {
+    ffCustomWrap.style.display = ffSel.value === 'その他' ? 'block' : 'none';
+  });
+
+  ffGroup.appendChild(ffLabel);
+  ffGroup.appendChild(ffSel);
+  ffGroup.appendChild(ffCustomWrap);
+
+  // Font Size
+  const fsGroup = document.createElement('div');
+  fsGroup.className = 'format-group';
+  const fsLabel = document.createElement('label');
+  fsLabel.textContent = 'フォントサイズ (pt)';
+  const fsInput = document.createElement('input');
+  fsInput.type = 'number';
+  fsInput.className = 'format-input';
+  fsInput.id = 'fmt-fontSize';
+  fsInput.step = '0.5';
+  fsInput.min = '1';
+  fsInput.max = '999';
+  fsInput.value = initial.fontSize;
+  fsGroup.appendChild(fsLabel);
+  fsGroup.appendChild(fsInput);
+
+  // Bold
+  const boldGroup = document.createElement('div');
+  boldGroup.className = 'format-group';
+  const boldLabel = document.createElement('label');
+  boldLabel.textContent = '太字';
+  const boldBtn = document.createElement('button');
+  boldBtn.className = 'toggle-bold' + (initial.bold ? ' on' : '');
+  boldBtn.id = 'fmt-bold';
+  boldBtn.textContent = initial.bold ? '太字 ON' : '太字 OFF';
+  boldBtn.dataset.bold = initial.bold ? '1' : '0';
+  boldBtn.addEventListener('click', () => {
+    const isOn = boldBtn.dataset.bold === '1';
+    boldBtn.dataset.bold = isOn ? '0' : '1';
+    boldBtn.textContent = isOn ? '太字 OFF' : '太字 ON';
+    boldBtn.classList.toggle('on', !isOn);
+  });
+  boldGroup.appendChild(boldLabel);
+  boldGroup.appendChild(boldBtn);
+
+  // Apply button
+  const applyBtn = document.createElement('button');
+  applyBtn.className = 'btn-apply';
+  applyBtn.textContent = '変更を適用';
+  applyBtn.addEventListener('click', applyFormatChanges);
+
+  body.appendChild(ffGroup);
+  body.appendChild(fsGroup);
+  body.appendChild(boldGroup);
+  body.appendChild(applyBtn);
+  panel.appendChild(body);
+}
+
+function computeInitialFormat(segs) {
+  // For each property, pick value with most characters; ties → earliest order
+  function bestValue(getter) {
+    const counts = new Map();
+    for (const s of segs) {
+      const v = getter(s);
+      const key = String(v);
+      if (!counts.has(key)) counts.set(key, { value: v, chars: 0, order: s.order });
+      counts.get(key).chars += s.text.length;
+    }
+    let best = null;
+    for (const [, info] of counts) {
+      if (!best || info.chars > best.chars ||
+          (info.chars === best.chars && info.order < best.order)) {
+        best = info;
+      }
+    }
+    return best ? best.value : null;
+  }
+
+  return {
+    fontFamily: bestValue(s => s.fmt.fontFamily) || '(未設定)',
+    fontSize: bestValue(s => s.fmt.fontSize) || 10.5,
+    bold: bestValue(s => s.fmt.bold) || false,
+  };
+}
+
+function applyFormatChanges() {
+  const ffSel = document.getElementById('fmt-fontFamily');
+  const ffCustom = document.getElementById('fmt-fontFamily-custom');
+  const fsInput = document.getElementById('fmt-fontSize');
+  const boldBtn = document.getElementById('fmt-bold');
+
+  if (!ffSel || !fsInput || !boldBtn) return;
+
+  const fontFamily = ffSel.value === 'その他' ? (ffCustom.value.trim() || ffSel.value) : ffSel.value;
+  const fontSize = parseFloat(fsInput.value);
+  const bold = boldBtn.dataset.bold === '1';
+
+  if (isNaN(fontSize) || fontSize <= 0) {
+    showToast('フォントサイズが無効です');
+    return;
+  }
+
+  const ids = Array.from(STATE.checkedIds);
+  ids.forEach(id => {
+    const seg = STATE.segments.find(s => s.id === id);
+    if (seg) {
+      seg.fmt.fontFamily = fontFamily;
+      seg.fmt.fontSize = fontSize;
+      seg.fmt.bold = bold;
+    }
+  });
+
+  showToast('書式を更新しました');
+  renderDocList();
+  updateFormatPanel();
+}
+
+// ============================================================
+// SELECT ALL / DESELECT
+// ============================================================
+document.getElementById('btn-select-all').addEventListener('click', () => {
+  STATE.segments.forEach(s => STATE.checkedIds.add(s.id));
+  renderDocList();
+  updateFormatPanel();
+});
+
+document.getElementById('btn-deselect-all').addEventListener('click', () => {
+  STATE.checkedIds.clear();
+  renderDocList();
+  updateFormatPanel();
+});
+
+// ============================================================
+// DOWNLOAD / WRITE BACK
+// ============================================================
+document.getElementById('btn-download').addEventListener('click', downloadDocx);
+
+async function downloadDocx() {
+  if (!STATE.originalZip || !STATE.xmlContent) return;
+  showLoading('書き戻し中...');
+  await new Promise(r => setTimeout(r, 50));
+
+  try {
+    // Build a modified XML
+    const modXml = applyFormatsToXml(STATE.xmlContent, STATE.segments);
+
+    // Clone zip and replace document.xml
+    const newZip = new JSZip();
+    const files = STATE.originalZip.files;
+    for (const [path, zipObj] of Object.entries(files)) {
+      if (zipObj.dir) {
+        newZip.folder(path);
+      } else if (path === 'word/document.xml') {
+        newZip.file(path, modXml);
+      } else {
+        const blob = await zipObj.async('arraybuffer');
+        newZip.file(path, blob);
+      }
+    }
+
+    const blob = await newZip.generateAsync({
+      type: 'blob',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      compression: 'DEFLATE',
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = STATE.fileName.replace(/\.docx$/i, '_edited.docx');
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    hideLoading();
+    showToast('ダウンロードを開始しました');
+  } catch(e) {
+    hideLoading();
+    showToast('ダウンロードに失敗しました: ' + e.message);
+    console.error(e);
+  }
+}
+
+function applyFormatsToXml(xmlText, segments) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, 'application/xml');
+  const NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+  // Build a map: paraIdx -> list of segments (in order)
+  const paraMap = new Map();
+  for (const seg of segments) {
+    if (!paraMap.has(seg.paraIdx)) paraMap.set(seg.paraIdx, []);
+    paraMap.get(seg.paraIdx).push(seg);
+  }
+
+  const body = doc.getElementsByTagNameNS(NS, 'body')[0];
+  if (!body) return new XMLSerializer().serializeToString(doc);
+
+  const paragraphs = Array.from(body.getElementsByTagNameNS(NS, 'p'));
+
+  for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+    const segs = paraMap.get(pIdx);
+    if (!segs) continue;
+
+    const para = paragraphs[pIdx];
+    const runs = Array.from(para.getElementsByTagNameNS(NS, 'r'));
+    if (runs.length === 0) continue;
+
+    // Collect text from original runs preserving xml:space
+    // We'll replace run content: match our segments (by text order) back to original runs
+    // Strategy: for each segment, find which original run(s) it spans, update their rPr
+
+    // First, build original run text array
+    const origRuns = [];
+    for (const r of runs) {
+      const tEls = r.getElementsByTagNameNS(NS, 't');
+      let text = '';
+      for (const t of tEls) text += t.textContent;
+      origRuns.push({ run: r, text });
+    }
+
+    // Map segments to runs
+    let segIdx = 0;
+    let segConsumed = 0;
+    let runIdx = 0;
+    let runConsumed = 0;
+
+    while (runIdx < origRuns.length && segIdx < segs.length) {
+      const seg = segs[segIdx];
+      const origRun = origRuns[runIdx];
+
+      // Apply format to this run based on current segment
+      applyFormatToRun(doc, origRun.run, seg.fmt, NS);
+
+      // Advance pointers
+      const segRemain = seg.text.length - segConsumed;
+      const runRemain = origRun.text.length - runConsumed;
+
+      if (runRemain <= segRemain) {
+        // Run is fully covered by this segment
+        runConsumed = 0;
+        runIdx++;
+        segConsumed += runRemain;
+        if (segConsumed >= seg.text.length) {
+          segConsumed = 0;
+          segIdx++;
+        }
+      } else {
+        // Run spans multiple segments
+        runConsumed += segRemain;
+        segConsumed = 0;
+        segIdx++;
+      }
+    }
+  }
+
+  const serializer = new XMLSerializer();
+  return serializer.serializeToString(doc);
+}
+
+function applyFormatToRun(doc, run, fmt, NS) {
+  // Get or create rPr
+  let rPr = run.getElementsByTagNameNS(NS, 'rPr')[0];
+  if (!rPr) {
+    rPr = doc.createElementNS(NS, 'w:rPr');
+    run.insertBefore(rPr, run.firstChild);
+  }
+
+  // Set rFonts
+  let rFonts = rPr.getElementsByTagNameNS(NS, 'rFonts')[0];
+  if (!rFonts) {
+    rFonts = doc.createElementNS(NS, 'w:rFonts');
+    rPr.insertBefore(rFonts, rPr.firstChild);
+  }
+  if (fmt.fontFamily && fmt.fontFamily !== '(未設定)') {
+    rFonts.setAttributeNS(NS, 'w:ascii', fmt.fontFamily);
+    rFonts.setAttributeNS(NS, 'w:hAnsi', fmt.fontFamily);
+    rFonts.setAttributeNS(NS, 'w:eastAsia', fmt.fontFamily);
+    rFonts.setAttributeNS(NS, 'w:cs', fmt.fontFamily);
+  }
+
+  // Set sz (half-points)
+  let sz = rPr.getElementsByTagNameNS(NS, 'sz')[0];
+  if (!sz) {
+    sz = doc.createElementNS(NS, 'w:sz');
+    rPr.appendChild(sz);
+  }
+  sz.setAttributeNS(NS, 'w:val', String(Math.round(fmt.fontSize * 2)));
+
+  let szCs = rPr.getElementsByTagNameNS(NS, 'szCs')[0];
+  if (!szCs) {
+    szCs = doc.createElementNS(NS, 'w:szCs');
+    rPr.appendChild(szCs);
+  }
+  szCs.setAttributeNS(NS, 'w:val', String(Math.round(fmt.fontSize * 2)));
+
+  // Set bold
+  let bEl = rPr.getElementsByTagNameNS(NS, 'b')[0];
+  let bCsEl = rPr.getElementsByTagNameNS(NS, 'bCs')[0];
+
+  if (fmt.bold) {
+    if (!bEl) {
+      bEl = doc.createElementNS(NS, 'w:b');
+      // Insert at appropriate position (after rFonts but before other props)
+      rPr.appendChild(bEl);
+    }
+    bEl.removeAttributeNS(NS, 'val');
+    if (!bCsEl) {
+      bCsEl = doc.createElementNS(NS, 'w:bCs');
+      rPr.appendChild(bCsEl);
+    }
+    bCsEl.removeAttributeNS(NS, 'val');
+  } else {
+    if (bEl) bEl.setAttributeNS(NS, 'w:val', 'false');
+    if (bCsEl) bCsEl.setAttributeNS(NS, 'w:val', 'false');
+  }
+}
+
+// ============================================================
+// FILE INPUT / DRAG AND DROP
+// ============================================================
+const dropArea = document.getElementById('drop-area');
+const fileInput = document.getElementById('file-input');
+
+dropArea.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropArea.classList.add('dragover');
+});
+dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+dropArea.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropArea.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) handleFile(file);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+document.getElementById('btn-reload').addEventListener('click', () => {
+  if (!confirm('変更内容は失われます。別のファイルを開きますか？')) return;
+  resetApp();
+});
+
+function resetApp() {
+  STATE.fileName = '';
+  STATE.originalZip = null;
+  STATE.xmlContent = '';
+  STATE.segments = [];
+  STATE.filters = ['none'];
+  STATE.checkedIds.clear();
+  segIdCounter = 0;
+
+  document.getElementById('upload-zone').classList.add('active');
+  document.getElementById('editor-area').classList.remove('active');
+  document.getElementById('btn-reload').style.display = 'none';
+  document.getElementById('btn-download').disabled = true;
+  fileInput.value = '';
+}
+
+async function handleFile(file) {
+  if (!file.name.endsWith('.docx')) {
+    showToast('.docx ファイルを選択してください');
+    return;
+  }
+
+  try {
+    await parseDocx(file);
+
+    // Switch to editor
+    document.getElementById('upload-zone').classList.remove('active');
+    document.getElementById('editor-area').classList.add('active');
+    document.getElementById('btn-reload').style.display = '';
+    document.getElementById('file-info-label').innerHTML =
+      `<strong>${file.name}</strong> — ${STATE.segments.length} セグメント`;
+    document.getElementById('btn-download').disabled = false;
+
+    STATE.filters = ['none'];
+    renderFilterSelects();
+    renderDocList();
+    updateFormatPanel();
+
+    showToast(`${STATE.segments.length} 件のテキストセグメントを読み込みました`);
+  } catch(e) {
+    showToast('ファイルの読み込みに失敗しました: ' + e.message);
+    console.error(e);
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+renderFilterSelects();
+</script>
+</body>
+</html>
