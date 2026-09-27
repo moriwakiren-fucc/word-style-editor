@@ -401,10 +401,42 @@
     flex-direction: column;
     gap: 6px;
   }
+  .format-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
   .format-group label {
     font-size: 12px;
     font-weight: 500;
     color: var(--text-secondary);
+  }
+  .fmt-enable-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .fmt-enable-wrap input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+  }
+  .fmt-enable-wrap span {
+    font-size: 11px;
+    color: var(--text-muted);
+    user-select: none;
+    cursor: pointer;
+  }
+  .format-group.disabled select.format-select,
+  .format-group.disabled input.format-input {
+    opacity: 0.35;
+    pointer-events: none;
+    background: var(--bg);
+  }
+  .format-group.disabled .toggle-bold {
+    opacity: 0.35;
+    pointer-events: none;
   }
 
   select.format-select, input.format-input {
@@ -1156,11 +1188,49 @@ function updateFormatPanel() {
   const body = document.createElement('div');
   body.className = 'format-body';
 
-  // Font Family
+  // Helper: build a "変更する" enable-checkbox and wire disabled state
+  function makeEnableCb(groupEl, inputEls, cbId) {
+    const wrap = document.createElement('div');
+    wrap.className = 'fmt-enable-wrap';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.id = cbId;
+    cb.checked = false;
+    const lbl = document.createElement('span');
+    lbl.textContent = '変更する';
+    lbl.addEventListener('click', () => { cb.checked = !cb.checked; cb.dispatchEvent(new Event('change')); });
+    wrap.appendChild(cb);
+    wrap.appendChild(lbl);
+
+    // Initial state: disabled
+    groupEl.classList.add('disabled');
+    cb.addEventListener('change', () => {
+      groupEl.classList.toggle('disabled', !cb.checked);
+      syncApplyBtn();
+    });
+    return wrap;
+  }
+
+  function syncApplyBtn() {
+    const ffCb  = document.getElementById('fmt-enable-ff');
+    const fsCb  = document.getElementById('fmt-enable-fs');
+    const bCb   = document.getElementById('fmt-enable-bold');
+    const anyOn = (ffCb && ffCb.checked) || (fsCb && fsCb.checked) || (bCb && bCb.checked);
+    const btn   = document.getElementById('fmt-apply-btn');
+    if (btn) btn.disabled = !anyOn;
+  }
+
+  // --- Font Family ---
   const ffGroup = document.createElement('div');
   ffGroup.className = 'format-group';
+
+  const ffHeader = document.createElement('div');
+  ffHeader.className = 'format-group-header';
   const ffLabel = document.createElement('label');
   ffLabel.textContent = 'フォントファミリー';
+  ffHeader.appendChild(ffLabel);
+  ffHeader.appendChild(makeEnableCb(ffGroup, [], 'fmt-enable-ff'));
+
   const ffSel = document.createElement('select');
   ffSel.className = 'format-select';
   ffSel.id = 'fmt-fontFamily';
@@ -1195,15 +1265,21 @@ function updateFormatPanel() {
     ffCustomWrap.style.display = ffSel.value === 'その他' ? 'block' : 'none';
   });
 
-  ffGroup.appendChild(ffLabel);
+  ffGroup.appendChild(ffHeader);
   ffGroup.appendChild(ffSel);
   ffGroup.appendChild(ffCustomWrap);
 
-  // Font Size
+  // --- Font Size ---
   const fsGroup = document.createElement('div');
   fsGroup.className = 'format-group';
+
+  const fsHeader = document.createElement('div');
+  fsHeader.className = 'format-group-header';
   const fsLabel = document.createElement('label');
   fsLabel.textContent = 'フォントサイズ (pt)';
+  fsHeader.appendChild(fsLabel);
+  fsHeader.appendChild(makeEnableCb(fsGroup, [], 'fmt-enable-fs'));
+
   const fsInput = document.createElement('input');
   fsInput.type = 'number';
   fsInput.className = 'format-input';
@@ -1212,14 +1288,21 @@ function updateFormatPanel() {
   fsInput.min = '1';
   fsInput.max = '999';
   fsInput.value = initial.fontSize;
-  fsGroup.appendChild(fsLabel);
+
+  fsGroup.appendChild(fsHeader);
   fsGroup.appendChild(fsInput);
 
-  // Bold
+  // --- Bold ---
   const boldGroup = document.createElement('div');
   boldGroup.className = 'format-group';
+
+  const boldHeader = document.createElement('div');
+  boldHeader.className = 'format-group-header';
   const boldLabel = document.createElement('label');
   boldLabel.textContent = '太字';
+  boldHeader.appendChild(boldLabel);
+  boldHeader.appendChild(makeEnableCb(boldGroup, [], 'fmt-enable-bold'));
+
   const boldBtn = document.createElement('button');
   boldBtn.className = 'toggle-bold' + (initial.bold ? ' on' : '');
   boldBtn.id = 'fmt-bold';
@@ -1231,13 +1314,16 @@ function updateFormatPanel() {
     boldBtn.textContent = isOn ? '太字 OFF' : '太字 ON';
     boldBtn.classList.toggle('on', !isOn);
   });
-  boldGroup.appendChild(boldLabel);
+
+  boldGroup.appendChild(boldHeader);
   boldGroup.appendChild(boldBtn);
 
-  // Apply button
+  // --- Apply button ---
   const applyBtn = document.createElement('button');
   applyBtn.className = 'btn-apply';
+  applyBtn.id = 'fmt-apply-btn';
   applyBtn.textContent = '変更を適用';
+  applyBtn.disabled = true; // all enable-cbs start unchecked
   applyBtn.addEventListener('click', applyFormatChanges);
 
   body.appendChild(ffGroup);
@@ -1275,29 +1361,42 @@ function computeInitialFormat(segs) {
 }
 
 function applyFormatChanges() {
-  const ffSel = document.getElementById('fmt-fontFamily');
+  const ffEnCb  = document.getElementById('fmt-enable-ff');
+  const fsEnCb  = document.getElementById('fmt-enable-fs');
+  const bEnCb   = document.getElementById('fmt-enable-bold');
+  const ffSel   = document.getElementById('fmt-fontFamily');
   const ffCustom = document.getElementById('fmt-fontFamily-custom');
   const fsInput = document.getElementById('fmt-fontSize');
   const boldBtn = document.getElementById('fmt-bold');
 
   if (!ffSel || !fsInput || !boldBtn) return;
 
-  const fontFamily = ffSel.value === 'その他' ? (ffCustom.value.trim() || ffSel.value) : ffSel.value;
-  const fontSize = parseFloat(fsInput.value);
-  const bold = boldBtn.dataset.bold === '1';
+  const changeFf   = ffEnCb  && ffEnCb.checked;
+  const changeFs   = fsEnCb  && fsEnCb.checked;
+  const changeBold = bEnCb   && bEnCb.checked;
 
-  if (isNaN(fontSize) || fontSize <= 0) {
-    showToast('フォントサイズが無効です');
-    return;
+  if (!changeFf && !changeFs && !changeBold) return;
+
+  let fontFamily, fontSize;
+  if (changeFf) {
+    fontFamily = ffSel.value === 'その他' ? (ffCustom.value.trim() || ffSel.value) : ffSel.value;
   }
+  if (changeFs) {
+    fontSize = parseFloat(fsInput.value);
+    if (isNaN(fontSize) || fontSize <= 0) {
+      showToast('フォントサイズが無効です');
+      return;
+    }
+  }
+  const bold = boldBtn.dataset.bold === '1';
 
   const ids = Array.from(STATE.checkedIds);
   ids.forEach(id => {
     const seg = STATE.segments.find(s => s.id === id);
     if (seg) {
-      seg.fmt.fontFamily = fontFamily;
-      seg.fmt.fontSize = fontSize;
-      seg.fmt.bold = bold;
+      if (changeFf)   seg.fmt.fontFamily = fontFamily;
+      if (changeFs)   seg.fmt.fontSize   = fontSize;
+      if (changeBold) seg.fmt.bold       = bold;
     }
   });
 
